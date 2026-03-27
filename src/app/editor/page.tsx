@@ -2,16 +2,14 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ImageUploader from "@/components/ImageUploader";
 import LoginButton from "@/components/LoginButton";
 import MarkdownEditor from "@/components/MarkdownEditor";
-import PublishForm from "@/components/PublishForm";
-
-type PublishResult =
-  | { type: "success"; postUrl: string }
-  | { type: "error"; message: string }
-  | null;
+import PublishForm, { type PublishOptions } from "@/components/PublishForm";
+import { showToast } from "@/components/Toast";
+import { useAutoSave, useLoadDraft } from "@/hooks/useAutoSave";
+import { clearDraft } from "@/lib/draft";
 
 export default function EditorPage() {
   const { data: session, status } = useSession();
@@ -20,7 +18,22 @@ export default function EditorPage() {
   const [markdown, setMarkdown] = useState("");
   const [images, setImages] = useState<File[]>([]);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [result, setResult] = useState<PublishResult>(null);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const publishOptionsRef = useRef<PublishOptions>({ openType: "all" });
+  const publishRef = useRef<(() => void) | null>(null);
+
+  const draft = useLoadDraft();
+  const { lastSaved } = useAutoSave(title, markdown);
+
+  // 드래프트 복원
+  useEffect(() => {
+    if (draft && !draftLoaded) {
+      setTitle(draft.title);
+      setMarkdown(draft.markdown);
+      setDraftLoaded(true);
+      showToast("info", "이전 임시저장 불러옴");
+    }
+  }, [draft, draftLoaded]);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -28,10 +41,21 @@ export default function EditorPage() {
     }
   }, [status, router]);
 
+  const handleImageAdd = useCallback((file: File) => {
+    setImages((prev) => [...prev, file]);
+  }, []);
+
+  const handleImageRemove = useCallback((index: number) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleOptionsChange = useCallback((options: PublishOptions) => {
+    publishOptionsRef.current = options;
+  }, []);
+
   const handlePublish = useCallback(
-    async (options: { categoryNo?: number; openType: string }) => {
+    async (options: PublishOptions) => {
       setIsPublishing(true);
-      setResult(null);
 
       try {
         const formData = new FormData();
@@ -55,17 +79,24 @@ export default function EditorPage() {
         const json = await res.json();
 
         if (json.success) {
-          setResult({ type: "success", postUrl: json.data.postUrl });
+          showToast("success", "발행 완료!");
+          clearDraft();
           setTitle("");
           setMarkdown("");
           setImages([]);
+
+          if (json.data?.postUrl) {
+            window.open(json.data.postUrl, "_blank");
+          }
         } else {
-          setResult({ type: "error", message: json.error });
+          showToast("error", json.error ?? "발행 실패");
         }
       } catch (error: unknown) {
         const message =
-          error instanceof Error ? error.message : "발행 중 오류가 발생했습니다";
-        setResult({ type: "error", message });
+          error instanceof Error
+            ? error.message
+            : "발행 중 오류가 발생했습니다";
+        showToast("error", message);
       } finally {
         setIsPublishing(false);
       }
@@ -73,74 +104,71 @@ export default function EditorPage() {
     [title, markdown, images]
   );
 
+  // Ctrl+Enter 단축키 — PublishForm의 현재 옵션 사용
+  useEffect(() => {
+    publishRef.current = () => {
+      if (title.trim() && markdown.trim() && !isPublishing) {
+        handlePublish(publishOptionsRef.current);
+      }
+    };
+  }, [title, markdown, isPublishing, handlePublish]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        publishRef.current?.();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   if (status === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <p className="text-gray-500">로딩 중...</p>
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-[#03C75A]" />
       </div>
     );
   }
 
-  if (!session) {
-    return null;
-  }
+  if (!session) return null;
 
   const canPublish = title.trim().length > 0 && markdown.trim().length > 0;
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <header className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">새 글 작성</h1>
+    <div className="mx-auto max-w-6xl px-4 py-6">
+      <header className="mb-6 flex items-center justify-between">
+        <h1 className="text-xl font-bold text-gray-900">Naver Blog Poster</h1>
         <LoginButton />
       </header>
 
-      {result?.type === "success" && (
-        <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4">
-          <p className="text-sm font-medium text-green-800">
-            발행 완료!{" "}
-            <a
-              href={result.postUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline"
-            >
-              블로그에서 보기
-            </a>
-          </p>
-        </div>
-      )}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_260px]">
+        <div className="space-y-5">
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="제목을 입력하세요"
+            className="w-full border-b-2 border-gray-200 px-1 py-3 text-2xl font-bold placeholder-gray-300 focus:border-[#03C75A] focus:outline-none"
+          />
 
-      {result?.type === "error" && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-800">{result.message}</p>
-        </div>
-      )}
+          <MarkdownEditor
+            value={markdown}
+            onChange={setMarkdown}
+            onImageAdd={handleImageAdd}
+          />
 
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_280px]">
-        <div className="space-y-6">
-          <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">
-              제목
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="포스트 제목을 입력하세요"
-              className="w-full rounded-lg border border-gray-300 px-4 py-3 text-lg focus:border-[#03C75A] focus:outline-none focus:ring-1 focus:ring-[#03C75A]"
-            />
-          </div>
-
-          <MarkdownEditor value={markdown} onChange={setMarkdown} />
-
-          <ImageUploader images={images} onImagesChange={setImages} />
+          <ImageUploader images={images} onRemove={handleImageRemove} />
         </div>
 
-        <div className="lg:sticky lg:top-8 lg:self-start">
+        <div className="lg:sticky lg:top-6 lg:self-start">
           <PublishForm
             onPublish={handlePublish}
+            onOptionsChange={handleOptionsChange}
             isPublishing={isPublishing}
             disabled={!canPublish}
+            lastSaved={lastSaved}
           />
         </div>
       </div>

@@ -14,16 +14,25 @@ interface Category {
   categoryName: string;
 }
 
+export interface PublishOptions {
+  categoryNo?: number;
+  openType: string;
+}
+
 interface PublishFormProps {
-  onPublish: (options: { categoryNo?: number; openType: string }) => void;
+  onPublish: (options: PublishOptions) => void;
+  onOptionsChange: (options: PublishOptions) => void;
   isPublishing: boolean;
   disabled: boolean;
+  lastSaved: string | null;
 }
 
 export default function PublishForm({
   onPublish,
+  onOptionsChange,
   isPublishing,
   disabled,
+  lastSaved,
 }: PublishFormProps) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("");
@@ -47,6 +56,13 @@ export default function PublishForm({
     }
     loadCategories();
   }, []);
+
+  useEffect(() => {
+    onOptionsChange({
+      categoryNo: selectedCategory ? Number(selectedCategory) : undefined,
+      openType,
+    });
+  }, [selectedCategory, openType, onOptionsChange]);
 
   const handlePublish = () => {
     onPublish({
@@ -100,6 +116,16 @@ export default function PublishForm({
       >
         {isPublishing ? "발행 중..." : "블로그에 발행"}
       </button>
+
+      <p className="text-center text-xs text-gray-400">
+        {disabled ? "제목과 본문을 입력하세요" : "Ctrl + Enter로 빠른 발행"}
+      </p>
+
+      {lastSaved && (
+        <p className="text-center text-xs text-gray-400">
+          임시저장 {lastSaved}
+        </p>
+      )}
     </div>
   );
 }
