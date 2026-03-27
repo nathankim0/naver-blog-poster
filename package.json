@@ -1,12 +1,22 @@
 {
   "name": "naver-blog-poster",
   "version": "0.1.0",
-  "private": true,
+  "description": "마크다운으로 네이버 블로그에 글을 발행하는 도구",
+  "keywords": ["naver", "blog", "markdown", "posting"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nathankim0/naver-blog-poster.git"
+  },
+  "license": "MIT",
+  "bin": {
+    "naver-blog-poster": "./bin/cli.mjs"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "setup": "node bin/cli.mjs"
   },
   "dependencies": {
     "@types/markdown-it": "^14.1.2",
